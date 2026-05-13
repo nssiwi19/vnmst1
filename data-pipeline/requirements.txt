@@ -1,0 +1,10 @@
+pandas
+curl_cffi
+beautifulsoup4
+DrissionPage
+unidecode
+lxml
+psycopg2-binary
+aiohttp
+google-cloud-bigquery
+openpyxl

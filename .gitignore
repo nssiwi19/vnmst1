@@ -1,0 +1,29 @@
+# IDE & System
+.cursor/
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+node_modules/
+dist/
+
+# Environment & Secrets
+.env
+*.env
+!.env.example
+
+# Data & Logs (Quan trọng)
+data-pipeline/out/
+data-pipeline/*.log
+backend-api/*.log
+*.jsonl
+*.log
+crawler_hsctvn.log
+
+# OS
+.DS_Store
+Thumbs.db
