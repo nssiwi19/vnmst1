@@ -1,5 +1,4 @@
 @echo off
-cd /d "c:\Users\Admin\.cursor\projects\empty-window\vn-mst-multi-agent"
 git add -A
 git commit -m "feat: Elite-DA Analytics Dashboard - storytelling charts, global filter sync, data quality audit
 

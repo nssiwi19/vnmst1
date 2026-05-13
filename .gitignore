@@ -18,6 +18,8 @@ dist/
 
 # Data & Logs (Quan trọng)
 data-pipeline/out/
+data-pipeline/data/*.csv
+data-pipeline/data/*.xlsx
 data-pipeline/*.log
 backend-api/*.log
 *.jsonl
