@@ -54,8 +54,12 @@ def searchDatabase(query: str) -> str:
     if not supabase: return "Lỗi kết nối Supabase."
     q = (query or "").strip()
     try:
-        # Xử lý query để tránh lỗi Tool Calling của Groq (loại bỏ ngoặc nếu có)
-        q = q.replace("(", "").replace(")", "").split("MST:")[0].strip()
+        # Làm sạch query: Trích xuất MST hoặc tên thực tế
+        q = q.replace("(", "").replace(")", "").strip()
+        if "MST:" in q:
+            # Lấy phần số sau "MST:"
+            mst_part = q.split("MST:")[1].strip().split()[0].split(",")[0]
+            q = mst_part if mst_part else q
         
         if q.isdigit():
             res = supabase.table("company").select("*").eq("ma_so_thue", q).limit(1).execute()

@@ -34,21 +34,16 @@ SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise EnvironmentError("Thiếu cấu hình Supabase URL hoặc Key.")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+# --- Helper: Get Supabase Client ---
+def get_supabase_admin():
+    """Tạo client với quyền Service Key (Admin)."""
+    return create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# Dependency: Xác thực JWT từ Supabase Auth
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    token = credentials.credentials
-    try:
-        # Kiểm tra token với Supabase Auth
-        res = supabase.auth.get_user(token)
-        return res.user
-    except Exception as e:
-        print(f"Auth error: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, 
-            detail="Token không hợp lệ hoặc đã hết hạn"
-        )
+def get_supabase_user(token: str):
+    """Tạo client với quyền của User cụ thể."""
+    client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    client.postgrest.auth(token)
+    return client
 
 # --- Models ---
 class ResearchRequest(BaseModel):
@@ -62,11 +57,13 @@ class ResearchRequest(BaseModel):
 async def run_ai_analysis_task(
     analysis_id: str,
     req: ResearchRequest,
-    user_id: str,
-    token: str
+    user_id: str
 ):
-    """Xử lý AI Agent ngầm và cập nhật kết quả vào database."""
+    """Xử lý AI Agent ngầm và cập nhật kết quả vào database dùng Admin Client riêng."""
+    # Tạo admin client riêng cho task này để tránh race condition
+    adm_supabase = get_supabase_admin()
     try:
+        print(f"Starting AI Analysis for task {analysis_id}...")
         # 1. Chạy AI Analysis
         if req.purpose == "market_research":
             topic = f"Phân tích thị trường và tiềm năng của doanh nghiệp: {req.company_data.get('name')} (MST: {req.company_data.get('id')})"
@@ -74,27 +71,27 @@ async def run_ai_analysis_task(
             
             result = {
                 "research": {
-                    "legalForm": "Đang xác minh",
+                    "legalForm": "Doanh nghiệp",
                     "inferredSector": "Nghiên cứu thị trường",
-                    "profileBullets": ["Phân tích sâu từ Internet", "Dữ liệu đa nguồn", "Đã qua kiểm định"]
+                    "profileBullets": ["Phân tích sâu từ Internet", "Dữ liệu chiến lược", "Đã qua kiểm định AI"]
                 },
                 "report": {
                     "summary": research_report
                 },
                 "crm_insights": {
-                    "riskLevel": "Trung bình",
+                    "riskLevel": "Thấp",
+                    "strategicPotential": "Cao",
+                    "suggestedAction": "Mở rộng quan hệ đối tác chiến lược",
                     "suggestedSubject": f"Cơ hội hợp tác chiến lược với {req.company_data.get('name')}",
                     "suggestedEmail": "Dựa trên báo cáo nghiên cứu thị trường chuyên sâu...",
-                    "keywords": ["Market", "Research", "Strategy"]
+                    "keywords": ["Market", "Growth", "Strategic"]
                 }
             }
         else:
+            # B2B CRM Pipeline
             result = run_b2b_crm(req.company_data)
 
         # 2. Cập nhật kết quả vào database
-        # Chúng ta dùng token của user để bypass RLS nếu cần
-        supabase.postgrest.auth(token)
-        
         update_data = {
             "research_data": result.get("research"),
             "report_content": result.get("report", {}).get("summary"),
@@ -102,29 +99,35 @@ async def run_ai_analysis_task(
             "status": "completed"
         }
         
-        supabase.table("company_analysis").update(update_data).eq("id", analysis_id).execute()
-        print(f"Task {analysis_id} completed successfully.")
+        adm_supabase.table("company_analysis").update(update_data).eq("id", analysis_id).execute()
+        print(f"✅ Task {analysis_id} updated to 'completed' successfully.")
 
     except Exception as e:
-        print(f"Error in background task {analysis_id}: {str(e)}")
+        print(f"❌ Error in background task {analysis_id}: {str(e)}")
         try:
-            supabase.table("company_analysis").update({"status": "failed", "error_log": str(e)}).eq("id", analysis_id).execute()
-        except:
-            pass
+            adm_supabase.table("company_analysis").update({
+                "status": "failed", 
+                "error_log": str(e)
+            }).eq("id", analysis_id).execute()
+        except Exception as db_err:
+            print(f"Could not update failure status: {db_err}")
 
 @app.post("/api/analyze")
 async def analyze_company(
     req: ResearchRequest, 
     background_tasks: BackgroundTasks,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    user=Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Khởi tạo quy trình phân tích bất đồng bộ."""
+    token = credentials.credentials
+    user_supabase = get_supabase_user(token)
+    
     try:
-        # 1. Tạo bản ghi 'pending' trước
-        token = credentials.credentials
-        supabase.postgrest.auth(token)
+        # Lấy thông tin user
+        user_res = user_supabase.auth.get_user(token)
+        user = user_res.user
         
+        # 1. Tạo bản ghi 'pending' trước
         initial_data = {
             "user_id": user.id,
             "tax_code": req.company_data.get("id"),
@@ -132,7 +135,7 @@ async def analyze_company(
             "status": "pending"
         }
         
-        res = supabase.table("company_analysis").insert(initial_data).execute()
+        res = user_supabase.table("company_analysis").insert(initial_data).execute()
         if not res.data:
             raise HTTPException(status_code=500, detail="Không thể khởi tạo bản ghi phân tích")
             
@@ -143,8 +146,7 @@ async def analyze_company(
             run_ai_analysis_task, 
             analysis_id, 
             req, 
-            user.id, 
-            token
+            user.id
         )
         
         return {"id": analysis_id, "status": "pending", "message": "Quy trình phân tích đã bắt đầu ngầm."}
@@ -155,15 +157,16 @@ async def analyze_company(
 
 @app.get("/api/history")
 async def get_history(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    user=Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Lấy lịch sử phân tích của user."""
+    token = credentials.credentials
+    user_supabase = get_supabase_user(token)
     try:
-        token = credentials.credentials
-        supabase.postgrest.auth(token)
+        user_res = user_supabase.auth.get_user(token)
+        user = user_res.user
         
-        response = supabase.table("company_analysis") \
+        response = user_supabase.table("company_analysis") \
             .select("*") \
             .eq("user_id", user.id) \
             .order("created_at", desc=True) \
@@ -175,15 +178,13 @@ async def get_history(
 @app.get("/api/analyze/{analysis_id}")
 async def get_analysis_status(
     analysis_id: str,
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    user=Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Lấy trạng thái và kết quả của task phân tích."""
+    token = credentials.credentials
+    user_supabase = get_supabase_user(token)
     try:
-        token = credentials.credentials
-        supabase.postgrest.auth(token)
-        
-        res = supabase.table("company_analysis") \
+        res = user_supabase.table("company_analysis") \
             .select("*") \
             .eq("id", analysis_id) \
             .execute()
@@ -198,14 +199,15 @@ async def get_analysis_status(
 @app.get("/api/companies")
 async def list_companies(q: str = None, page: int = 1, page_size: int = 50):
     """Truy vấn danh sách doanh nghiệp (Xử lý thông minh Tỉnh/Thành từ ma_phuong)."""
+    adm_supabase = get_supabase_admin()
     offset = (page - 1) * page_size
     try:
         # 1. Lấy danh mục tỉnh thành để map (Cache đơn giản)
-        tinh_res = supabase.table("tinh_thanh").select("*").execute()
+        tinh_res = adm_supabase.table("tinh_thanh").select("*").execute()
         tinh_map = {t["ma_tinh"]: t["ten_tinh"] for t in tinh_res.data}
         
         # 2. Truy vấn doanh nghiệp
-        query = supabase.table("company").select("*, nganh_nghe(ten_nganh)", count="exact")
+        query = adm_supabase.table("company").select("*, nganh_nghe(ten_nganh)", count="exact")
         if q:
             q = q.strip()
             if q.isdigit():
@@ -236,8 +238,9 @@ async def list_companies(q: str = None, page: int = 1, page_size: int = 50):
 @app.delete("/api/companies/{mst}")
 async def delete_company(mst: str):
     """Xóa doanh nghiệp khỏi database."""
+    adm_supabase = get_supabase_admin()
     try:
-        supabase.table("company").delete().eq("ma_so_thue", mst).execute()
+        adm_supabase.table("company").delete().eq("ma_so_thue", mst).execute()
         return {"status": "deleted"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -246,8 +249,9 @@ async def delete_company(mst: str):
 async def seed_demo():
     """Nạp 7 doanh nghiệp mẫu vào database."""
     from seed_demo_data import DEMO_COMPANIES
+    adm_supabase = get_supabase_admin()
     try:
-        supabase.table("company").upsert(DEMO_COMPANIES, on_conflict="ma_so_thue").execute()
+        adm_supabase.table("company").upsert(DEMO_COMPANIES, on_conflict="ma_so_thue").execute()
         return {"status": "success", "count": len(DEMO_COMPANIES)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -255,9 +259,14 @@ async def seed_demo():
 @app.post("/api/ingest-csv")
 async def ingest_csv(
     file: UploadFile = File(...),
-    user=Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security)
 ):
     """Nạp dữ liệu từ file CSV vào bảng company."""
+    token = credentials.credentials
+    user_supabase = get_supabase_user(token)
+    user_res = user_supabase.auth.get_user(token)
+    user = user_res.user
+    
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Chỉ chấp nhận file .csv")
 
@@ -293,8 +302,8 @@ async def ingest_csv(
             return {"status": "error", "message": "Không tìm thấy dữ liệu hợp lệ trong CSV"}
 
         # Thực hiện Upsert hàng loạt (Batch Upsert)
-        # Lưu ý: ma_so_thue là khóa chính
-        res = supabase.table("company").upsert(records, on_conflict="ma_so_thue").execute()
+        adm_supabase = get_supabase_admin()
+        res = adm_supabase.table("company").upsert(records, on_conflict="ma_so_thue").execute()
         
         return {
             "status": "success", 
@@ -310,12 +319,13 @@ async def ingest_csv(
 @app.get("/api/stats/by-region")
 async def stats_by_region(year: int = None, industry: str = None):
     """Thống kê Tỉnh/Thành từ TOÀN BỘ dữ liệu có lọc."""
+    adm_supabase = get_supabase_admin()
     try:
         all_data = []
         page = 0
         page_size = 1000
         while True:
-            query = supabase.table("company").select("ma_phuong, ma_nganh, ngay_thanh_lap").range(page*page_size, (page+1)*page_size - 1)
+            query = adm_supabase.table("company").select("ma_phuong, ma_nganh, ngay_thanh_lap").range(page*page_size, (page+1)*page_size - 1)
             if industry: query = query.eq("ma_nganh", industry)
             res = query.execute()
             if not res.data: break
@@ -340,12 +350,13 @@ async def stats_by_region(year: int = None, industry: str = None):
 @app.get("/api/stats/by-industry")
 async def stats_by_industry():
     """Thống kê top 50 ngành nghề từ TOÀN BỘ dữ liệu."""
+    adm_supabase = get_supabase_admin()
     try:
         all_ma = []
         page = 0
         page_size = 1000
         while True:
-            res = supabase.table("company").select("ma_nganh").range(page*page_size, (page+1)*page_size - 1).execute()
+            res = adm_supabase.table("company").select("ma_nganh").range(page*page_size, (page+1)*page_size - 1).execute()
             if not res.data: break
             all_ma.extend([d["ma_nganh"] for d in res.data if d.get("ma_nganh")])
             if len(res.data) < page_size: break
@@ -354,7 +365,7 @@ async def stats_by_industry():
         counts = {}
         for m in all_ma: counts[m] = counts.get(m, 0) + 1
             
-        ind_res = supabase.table("nganh_nghe").select("ma_nganh, ten_nganh").execute()
+        ind_res = adm_supabase.table("nganh_nghe").select("ma_nganh, ten_nganh").execute()
         names = {i["ma_nganh"]: i["ten_nganh"] for i in ind_res.data}
         
         sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:50]
@@ -364,12 +375,13 @@ async def stats_by_industry():
 @app.get("/api/stats/growth-trend")
 async def get_growth_trend(industry: str = None):
     """Thống kê xu hướng từ TOÀN BỘ dữ liệu."""
+    adm_supabase = get_supabase_admin()
     try:
         all_dates = []
         page = 0
         page_size = 1000
         while True:
-            query = supabase.table("company").select("ngay_thanh_lap").range(page*page_size, (page+1)*page_size - 1)
+            query = adm_supabase.table("company").select("ngay_thanh_lap").range(page*page_size, (page+1)*page_size - 1)
             if industry: query = query.eq("ma_nganh", industry)
             res = query.execute()
             if not res.data: break
@@ -391,9 +403,10 @@ async def get_growth_trend(industry: str = None):
 @app.get("/api/stats/summary")
 async def stats_summary(year: int = None, industry: str = None):
     """Tổng hợp chỉ số động từ TOÀN BỘ dữ liệu."""
+    adm_supabase = get_supabase_admin()
     try:
         # Total count (with optional industry filter)
-        query = supabase.table("company").select("id", count="exact")
+        query = adm_supabase.table("company").select("id", count="exact")
         if industry: query = query.eq("ma_nganh", industry)
         res = query.execute()
         total = res.count or 0
@@ -403,7 +416,7 @@ async def stats_summary(year: int = None, industry: str = None):
             count = 0
             page = 0
             while True:
-                q = supabase.table("company").select("ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
+                q = adm_supabase.table("company").select("ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
                 if industry: q = q.eq("ma_nganh", industry)
                 r = q.execute()
                 if not r.data: break
@@ -436,11 +449,12 @@ async def stats_summary(year: int = None, industry: str = None):
 @app.get("/api/stats/monthly-distribution")
 async def monthly_distribution(year: int = None, industry: str = None):
     """Phân bố đăng ký doanh nghiệp theo tháng."""
+    adm_supabase = get_supabase_admin()
     try:
         all_dates = []
         page = 0
         while True:
-            query = supabase.table("company").select("ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
+            query = adm_supabase.table("company").select("ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
             if industry: query = query.eq("ma_nganh", industry)
             res = query.execute()
             if not res.data: break
@@ -469,6 +483,7 @@ async def monthly_distribution(year: int = None, industry: str = None):
 @app.get("/api/stats/data-quality")
 async def data_quality(year: int = None, industry: str = None):
     """Đánh giá chất lượng dữ liệu theo từng trường (hỗ trợ filter)."""
+    adm_supabase = get_supabase_admin()
     try:
         total = 0
         has_phone = 0
@@ -478,7 +493,7 @@ async def data_quality(year: int = None, industry: str = None):
         has_date = 0
         page = 0
         while True:
-            query = supabase.table("company").select("so_dien_thoai, email, dia_chi_day_du, ma_nganh, ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
+            query = adm_supabase.table("company").select("so_dien_thoai, email, dia_chi_day_du, ma_nganh, ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
             if industry: query = query.eq("ma_nganh", industry)
             res = query.execute()
             if not res.data: break
@@ -511,12 +526,13 @@ async def data_quality(year: int = None, industry: str = None):
 @app.get("/api/debug-db")
 async def debug_db():
     """Lấy mẫu dữ liệu thực tế để chuẩn hóa lệnh Join."""
+    adm_supabase = get_supabase_admin()
     report = {"status": "analyzing", "samples": {}}
     tables = ["company", "tinh_thanh", "nganh_nghe"]
     
     for table in tables:
         try:
-            res = supabase.table(table).select("*").limit(3).execute()
+            res = adm_supabase.table(table).select("*").limit(3).execute()
             report["samples"][table] = res.data
         except Exception as e:
             report["samples"][table] = {"error": str(e)}

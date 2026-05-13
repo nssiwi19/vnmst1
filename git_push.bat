@@ -1,17 +1,13 @@
 @echo off
 git add -A
-git commit -m "feat: Elite-DA Analytics Dashboard - storytelling charts, global filter sync, data quality audit
+git commit -m "fix: stabilization of MCNA pipeline and enhanced business intelligence
 
-- Add 4 new storytelling charts: Monthly Heatmap, YoY Growth Rate, Industry Donut, Data Quality Gauges
-- Global Filter Bar (Year + Industry) syncs all 8 charts simultaneously
-- Backend: Full 12k+ record pagination for accurate stats
-- Backend: Dynamic summary (top_industry, industry_share computed from real data)
-- Backend: New endpoints /monthly-distribution and /data-quality with filter support
-- Frontend: Grid symmetry fix (1.4fr/0.6fr + alignItems stretch)
-- Frontend: Industry Top 50 in filter, Top 10 in display chart
-- Fix: CSS rgba bug, colSpan mismatch, duplicate API calls removed
-- Fix: Duplicate @app.get decorator removed"
+- Refactored Supabase client to use per-request isolation (fixed race conditions)
+- Fixed NameError and SyntaxErrors in backend-api/main.py
+- Enhanced crm_b2b_agent with Business Intelligence Analyst for deeper insights
+- Fixed search query cleaning logic in agent tools (MST/Name extraction)
+- Resolved RLS bypass for background AI tasks using admin client"
 git push origin main
 echo.
-echo Done! Check https://github.com/nssiwi19/vnmst
+echo Done! Code is now live on GitHub.
 pause

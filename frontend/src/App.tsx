@@ -167,8 +167,8 @@ export default function App() {
           <div className="logo-section">
             <div className="logo-box"><Building2 size={20} /></div>
             <div className="logo-text">
-              <span className="brand">Elite-DA Intelligence</span>
-              <span className="version">Enterprise Edition</span>
+              <span className="brand">E14CRM MCNA</span>
+              <span className="version">Enterprise Intelligence</span>
             </div>
           </div>
           <nav className="nav">
@@ -225,30 +225,38 @@ export default function App() {
               </div>
             </section>
 
-            <div className="stepper">
-              {[
-                { key: "fetching_raw", label: "Dữ liệu gốc", icon: Search },
-                { key: "researching", label: "Agent Research", icon: BarChart3 },
-                { key: "reporting", label: "Agent Report", icon: FileText },
-                { key: "verifying", label: "Agent Verify", icon: CheckCircle2 },
-              ].map((s, idx) => {
-                const isActive = pipeline.step === s.key;
-                const isDone = (
-                  (idx === 0 && ["researching", "reporting", "verifying", "completed"].includes(pipeline.step)) ||
-                  (idx === 1 && ["reporting", "verifying", "completed"].includes(pipeline.step)) ||
-                  (idx === 2 && ["verifying", "completed"].includes(pipeline.step)) ||
-                  (idx === 3 && pipeline.step === "completed")
-                );
-                return (
-                  <div key={idx} className={`step-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}>
-                    <div className="step-icon">{isActive ? <Loader2 className="animate-spin" size={16}/> : <s.icon size={16}/>}</div>
-                    <div className="step-content">
-                      <span className="step-num">BƯỚC {idx + 1}</span>
-                      <span className="step-label">{s.label}</span>
+            <div className="stepper-container" style={{position: 'relative', marginBottom: '2rem'}}>
+              <div className="stepper">
+                {[
+                  { key: "fetching_raw", label: "Dữ liệu gốc", icon: Search, desc: "Tra cứu MST & Metadata" },
+                  { key: "researching", label: "Agent Research", icon: BarChart3, desc: "Nghiên cứu Internet & DB" },
+                  { key: "reporting", label: "Agent Report", icon: FileText, desc: "Tổng hợp báo cáo chiến lược" },
+                  { key: "verifying", label: "Agent Verify", icon: CheckCircle2, desc: "Kiểm định & Trích xuất CRM" },
+                ].map((s, idx) => {
+                  const isActive = pipeline.step === s.key;
+                  const isDone = (
+                    (idx === 0 && ["researching", "reporting", "verifying", "completed"].includes(pipeline.step)) ||
+                    (idx === 1 && ["reporting", "verifying", "completed"].includes(pipeline.step)) ||
+                    (idx === 2 && ["verifying", "completed"].includes(pipeline.step)) ||
+                    (idx === 3 && pipeline.step === "completed")
+                  );
+                  return (
+                    <div key={idx} className={`step-item ${isActive ? 'active' : ''} ${isDone ? 'done' : ''}`}>
+                      <div className="step-icon">{isActive ? <Loader2 className="animate-spin" size={16}/> : <s.icon size={16}/>}</div>
+                      <div className="step-content">
+                        <span className="step-num">BƯỚC {idx + 1}</span>
+                        <span className="step-label">{s.label}</span>
+                        <span className="step-desc" style={{fontSize: '0.65rem', color: '#64748b', marginTop: '2px'}}>{s.desc}</span>
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
+              {pipeline.step !== "idle" && pipeline.step !== "completed" && pipeline.step !== "error" && (
+                <div className="status-toast animate-pulse" style={{position: 'absolute', right: 0, top: '-30px', fontSize: '0.75rem', color: '#3b82f6', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px'}}>
+                  <Sparkles size={14} /> Agent đang làm việc...
+                </div>
+              )}
             </div>
 
             {pipeline.step === "error" && <div className="card" style={{borderColor: '#ef4444', color: '#ef4444', padding: '1rem'}}>Lỗi: {pipeline.error}</div>}
@@ -309,18 +317,71 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div style={{display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '1.5rem'}}>
-                    <div>
-                      <label style={{fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase'}}>Chủ đề đề xuất</label>
-                      <div className="subject-line" style={{marginTop: '8px', padding: '12px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', color: '#38bdf8', fontWeight: 600, fontSize: '0.9rem'}}>
+                  <div style={{display: 'grid', gridTemplateColumns: '1.2fr 2fr', gap: '1.5rem'}}>
+                    <div className="crm-sidebar">
+                      <div className="insight-stat-grid" style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '1.5rem'}}>
+                        <div className="stat-pill" style={{background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)'}}>
+                          <label style={{fontSize: '0.6rem', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px'}}>Rủi ro</label>
+                          <span style={{fontSize: '0.85rem', fontWeight: 700, color: crmInsightsDisplay.riskLevel === 'Thấp' ? '#10b981' : '#f59e0b'}}>{crmInsightsDisplay.riskLevel}</span>
+                        </div>
+                        <div className="stat-pill" style={{background: 'rgba(255,255,255,0.03)', padding: '10px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.05)'}}>
+                          <label style={{fontSize: '0.6rem', color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: '4px'}}>Tiềm năng</label>
+                          <span style={{fontSize: '0.85rem', fontWeight: 700, color: '#3b82f6'}}>{crmInsightsDisplay.strategicPotential || 'Cao'}</span>
+                        </div>
+                      </div>
+
+                      <label style={{fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase'}}>Hành động đề xuất</label>
+                      <div style={{color: '#fff', fontSize: '0.9rem', margin: '8px 0 1.5rem', fontWeight: 500}}>{crmInsightsDisplay.suggestedAction}</div>
+
+                      <label style={{fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase'}}>Chủ đề Email</label>
+                      <div className="subject-line" style={{marginTop: '8px', padding: '12px', background: 'rgba(56, 189, 248, 0.1)', borderRadius: '8px', color: '#38bdf8', fontWeight: 600, fontSize: '0.85rem', marginBottom: '1rem'}}>
                         {stripMarkdown(crmInsightsDisplay.suggestedSubject)}
                       </div>
+                      
                       <div className="keyword-row">
                         {crmInsightsDisplay.keywords?.map((k: string, i: number) => <span key={i} className="keyword-pill">#{k}</span>)}
                       </div>
                     </div>
-                    <div className="email-body" style={{position: 'relative'}}>
-                      {stripMarkdown(crmInsightsDisplay.suggestedEmail)}
+                    <div className="crm-main-content">
+                       <div style={{display: 'flex', gap: '10px', marginBottom: '10px'}}>
+                         <button className="sub-tab-btn active" style={{background: 'rgba(56, 189, 248, 0.2)', border: 'none', color: '#38bdf8', padding: '6px 15px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 600}}>Email Template</button>
+                         <button className="sub-tab-btn" style={{background: 'rgba(255,255,255,0.05)', border: 'none', color: '#94a3b8', padding: '6px 15px', borderRadius: '20px', fontSize: '0.75rem', fontWeight: 600}}>Call Script</button>
+                       </div>
+                       <div className="email-body" style={{position: 'relative', minHeight: '200px'}}>
+                        {stripMarkdown(crmInsightsDisplay.suggestedEmail)}
+                       </div>
+                       {crmInsightsDisplay.callScript && (
+                         <div className="call-script-preview" style={{marginTop: '15px', padding: '12px', background: 'rgba(16, 185, 129, 0.05)', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.1)', fontSize: '0.8rem', color: '#10b981', marginBottom: '1.5rem'}}>
+                            <strong>Call Script:</strong> {crmInsightsDisplay.callScript.substring(0, 80)}...
+                         </div>
+                       )}
+
+                       <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem'}}>
+                         <div>
+                            <label style={{fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px'}}>
+                              <Target size={14} /> Nhân sự key cần tiếp cận
+                            </label>
+                            <div style={{display: 'flex', flexDirection: 'column', gap: '8px'}}>
+                              {crmInsightsDisplay.decisionMakers?.map((dm: any, i: number) => (
+                                <div key={i} style={{fontSize: '0.8rem', padding: '8px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)'}}>
+                                  <div style={{fontWeight: 700, color: '#fff'}}>{dm.role}</div>
+                                  <div style={{fontSize: '0.7rem', color: '#3b82f6'}}>{dm.approach}</div>
+                                </div>
+                              ))}
+                            </div>
+                         </div>
+                         <div>
+                            <label style={{fontSize: '0.7rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px'}}>
+                              <Zap size={14} /> Đối thủ & Tiềm năng
+                            </label>
+                            <div style={{fontSize: '0.8rem', color: '#cbd5e1', marginBottom: '1rem'}}>
+                               <strong>Cạnh tranh:</strong> {crmInsightsDisplay.competitors?.join(", ")}
+                            </div>
+                            <div style={{fontSize: '0.8rem', color: '#cbd5e1', padding: '10px', background: 'rgba(139, 92, 246, 0.05)', borderRadius: '8px', border: '1px solid rgba(139, 92, 246, 0.1)'}}>
+                               <strong>Triển vọng:</strong> {crmInsightsDisplay.growthOutlook}
+                            </div>
+                         </div>
+                       </div>
                     </div>
                   </div>
                 </div>

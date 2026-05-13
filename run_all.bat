@@ -6,7 +6,7 @@ echo ====================================================
 
 :: 1. Khoi dong Backend FastAPI
 :: Su dung python -m uvicorn de dam bao chay dung moi truong venv
-start cmd /k "echo Dang khoi dong Backend API... && cd /d %ROOT_DIR%backend-api && ..\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+start cmd /k "echo Dang khoi dong Backend API... && cd /d %ROOT_DIR%backend-api && .\.venv\Scripts\python.exe -m uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
 :: 2. Khoi dong Frontend React (Vite)
 start cmd /k "echo Dang khoi dong Frontend React... && cd /d %ROOT_DIR%frontend && npm run dev"
