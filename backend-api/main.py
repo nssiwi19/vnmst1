@@ -6,13 +6,16 @@ from supabase import create_client, Client
 import os
 import csv
 import io
+import uvicorn
 from dotenv import load_dotenv
 
 # Import các pipeline đã được refactor
 from crm_b2b_agent import run_b2b_crm
 from market_research_agent import run_market_research
 
-load_dotenv()
+# Tải biến môi trường (tìm kiếm ở thư mục hiện tại và cha)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 app = FastAPI(title="Elite-DA API", version="1.0.0")
 
@@ -29,7 +32,7 @@ security = HTTPBearer()
 
 # Kết nối Supabase
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 
 if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
     raise EnvironmentError("Thiếu cấu hình Supabase URL hoặc Key.")
@@ -67,7 +70,9 @@ async def run_ai_analysis_task(
         # 1. Chạy AI Analysis
         if req.purpose == "market_research":
             topic = f"Phân tích thị trường và tiềm năng của doanh nghiệp: {req.company_data.get('name')} (MST: {req.company_data.get('id')})"
+            print(f"DEBUG: Starting Market Research for {req.tax_code}...")
             research_report = run_market_research(topic)
+            print(f"DEBUG: Market Research completed.")
             
             result = {
                 "research": {
@@ -89,7 +94,9 @@ async def run_ai_analysis_task(
             }
         else:
             # B2B CRM Pipeline
+            print(f"DEBUG: Starting CRM B2B Analysis for {req.tax_code}...")
             result = run_b2b_crm(req.company_data)
+            print(f"DEBUG: CRM B2B Analysis completed.")
 
         # 2. Cập nhật kết quả vào database
         update_data = {
@@ -202,11 +209,16 @@ async def list_companies(q: str = None, page: int = 1, page_size: int = 50):
     adm_supabase = get_supabase_admin()
     offset = (page - 1) * page_size
     try:
-        # 1. Lấy danh mục tỉnh thành để map (Cache đơn giản)
-        tinh_res = adm_supabase.table("tinh_thanh").select("*").execute()
-        tinh_map = {t["ma_tinh"]: t["ten_tinh"] for t in tinh_res.data}
+        # 1. Lấy danh mục tỉnh thành để map (Xử lý an toàn nếu bảng chưa tồn tại)
+        tinh_map = {}
+        try:
+            tinh_res = adm_supabase.table("tinh_thanh").select("*").execute()
+            if tinh_res.data:
+                tinh_map = {t["ma_tinh"]: t["ten_tinh"] for t in tinh_res.data}
+        except Exception as e:
+            print(f"Warning: Could not fetch tinh_thanh table: {e}")
         
-        # 2. Truy vấn doanh nghiệp
+        # 2. Truy vấn doanh nghiệp (Lấy kèm tên ngành nghề)
         query = adm_supabase.table("company").select("*, nganh_nghe(ten_nganh)", count="exact")
         if q:
             q = q.strip()
@@ -215,7 +227,11 @@ async def list_companies(q: str = None, page: int = 1, page_size: int = 50):
             else:
                 query = query.ilike("ten_cong_ty", f"%{q}%")
         
-        response = query.range(offset, offset + page_size - 1).order("created_at", desc=True).execute()
+        # Thử sắp xếp theo created_at, nếu lỗi thì lấy mặc định
+        try:
+            response = query.range(offset, offset + page_size - 1).order("created_at", desc=True).execute()
+        except:
+            response = query.range(offset, offset + page_size - 1).execute()
         
         normalized = []
         for item in (response.data or []):
@@ -318,8 +334,15 @@ async def ingest_csv(
 
 @app.get("/api/stats/by-region")
 async def stats_by_region(year: int = None, industry: str = None):
-    """Thống kê Tỉnh/Thành từ TOÀN BỘ dữ liệu có lọc."""
+    """Thống kê Tỉnh/Thành (Ưu tiên RPC, fallback Python)."""
     adm_supabase = get_supabase_admin()
+    try:
+        # Try RPC first
+        res = adm_supabase.rpc("get_stats_by_region", {"p_year": year, "p_industry": industry}).execute()
+        if res.data: return res.data
+    except Exception as e:
+        print(f"RPC by-region failed, using fallback: {e}")
+
     try:
         all_data = []
         page = 0
@@ -348,15 +371,26 @@ async def stats_by_region(year: int = None, industry: str = None):
     except: return []
 
 @app.get("/api/stats/by-industry")
-async def stats_by_industry():
-    """Thống kê top 50 ngành nghề từ TOÀN BỘ dữ liệu."""
+async def stats_by_industry(year: int = None, industry: str = None):
+    """Thống kê top 50 ngành nghề (Ưu tiên RPC, fallback Python)."""
     adm_supabase = get_supabase_admin()
+    if year is None and industry is None:
+        try:
+            res = adm_supabase.rpc("get_stats_by_industry").execute()
+            if res.data: return res.data
+        except Exception as e:
+            print(f"RPC by-industry failed: {e}")
+
     try:
+        query = adm_supabase.table("company").select("ma_nganh")
+        if industry: query = query.eq("ma_nganh", industry)
+        if year: query = query.like("ngay_thanh_lap", f"%{year}%")
+        
         all_ma = []
         page = 0
         page_size = 1000
         while True:
-            res = adm_supabase.table("company").select("ma_nganh").range(page*page_size, (page+1)*page_size - 1).execute()
+            res = query.range(page*page_size, (page+1)*page_size - 1).execute()
             if not res.data: break
             all_ma.extend([d["ma_nganh"] for d in res.data if d.get("ma_nganh")])
             if len(res.data) < page_size: break
@@ -373,17 +407,31 @@ async def stats_by_industry():
     except: return []
 
 @app.get("/api/stats/growth-trend")
-async def get_growth_trend(industry: str = None):
-    """Thống kê xu hướng từ TOÀN BỘ dữ liệu."""
+async def get_growth_trend(year: int = None, industry: str = None):
+    """Thống kê xu hướng (Ưu tiên RPC, fallback Python). Lưu ý: bỏ qua year filter vì đây là biểu đồ qua các năm."""
     adm_supabase = get_supabase_admin()
+    
+    # Try RPC first (RPC also ignores year, it only takes industry)
     try:
+        res = adm_supabase.rpc("get_growth_trend", {"p_industry": industry}).execute()
+        if res.data: 
+            # Filter RPC data to only include 2024-2026 in case the DB hasn't been updated
+            filtered_data = [d for d in res.data if int(d["name"]) >= 2024]
+            return filtered_data
+    except Exception as e:
+        print(f"RPC growth-trend failed: {e}")
+
+    try:
+        query = adm_supabase.table("company").select("ngay_thanh_lap")
+        if industry: query = query.eq("ma_nganh", industry)
+        # Note: We intentionally DO NOT filter by year here.
+        # A longitudinal chart (2015-2026) should show all years to display the trend.
+        
         all_dates = []
         page = 0
         page_size = 1000
         while True:
-            query = adm_supabase.table("company").select("ngay_thanh_lap").range(page*page_size, (page+1)*page_size - 1)
-            if industry: query = query.eq("ma_nganh", industry)
-            res = query.execute()
+            res = query.range(page*page_size, (page+1)*page_size - 1).execute()
             if not res.data: break
             all_dates.extend([d["ngay_thanh_lap"] for d in res.data if d.get("ngay_thanh_lap")])
             if len(res.data) < page_size: break
@@ -392,12 +440,12 @@ async def get_growth_trend(industry: str = None):
         yearly_counts = {}
         for date_str in all_dates:
             try:
-                year = int(date_str.split('/')[-1]) if '/' in date_str else int(date_str.split('-')[0])
-                if 2015 <= year <= 2026:
-                    yearly_counts[year] = yearly_counts.get(year, 0) + 1
+                y = int(date_str.split('/')[-1]) if '/' in date_str else int(date_str.split('-')[0])
+                if 2024 <= y <= 2026:
+                    yearly_counts[y] = yearly_counts.get(y, 0) + 1
             except: continue
         
-        return [{"name": str(y), "value": yearly_counts.get(y, 0)} for y in range(2015, 2027)]
+        return [{"name": str(y), "value": yearly_counts.get(y, 0)} for y in range(2024, 2027)]
     except: return []
 
 @app.get("/api/stats/summary")
@@ -405,42 +453,51 @@ async def stats_summary(year: int = None, industry: str = None):
     """Tổng hợp chỉ số động từ TOÀN BỘ dữ liệu."""
     adm_supabase = get_supabase_admin()
     try:
-        # Total count (with optional industry filter)
-        query = adm_supabase.table("company").select("id", count="exact")
+        # Total count (Sử dụng ma_so_thue là khóa chính thực tế)
+        # Build the exact count query
+        query = adm_supabase.table("company").select("ma_so_thue", count="exact")
         if industry: query = query.eq("ma_nganh", industry)
+        if year: query = query.like("ngay_thanh_lap", f"%{year}%")
+        
         res = query.execute()
         total = res.count or 0
-        
-        # If year filter, count by scanning ngay_thanh_lap
-        if year:
-            count = 0
-            page = 0
-            while True:
-                q = adm_supabase.table("company").select("ngay_thanh_lap").range(page*1000, (page+1)*1000 - 1)
-                if industry: q = q.eq("ma_nganh", industry)
-                r = q.execute()
-                if not r.data: break
-                count += sum(1 for d in r.data if d.get("ngay_thanh_lap") and str(year) in d.get("ngay_thanh_lap"))
-                if len(r.data) < 1000: break
-                page += 1
-            total = count
 
-        # Dynamic top industry from by-industry endpoint
+        # Dynamic top industry
         try:
-            ind_data = await stats_by_industry()
-            top_name = ind_data[0]["name"].split("-")[-1].strip() if ind_data else "N/A"
-            top_value = ind_data[0]["value"] if ind_data else 0
-            total_ind = sum(d["value"] for d in ind_data) if ind_data else 1
-            share = round((top_value / total_ind) * 100, 1) if total_ind > 0 else 0
+            if industry:
+                ind_res = adm_supabase.table("nganh_nghe").select("ten_nganh").eq("ma_nganh", industry).execute()
+                top_name = ind_res.data[0]["ten_nganh"] if ind_res.data else industry
+                share = 100.0
+            else:
+                # Fallback to overall top industry
+                ind_data = await stats_by_industry()
+                if ind_data and len(ind_data) > 0:
+                    top_name = ind_data[0]["name"].split("-")[-1].strip()
+                    top_value = ind_data[0]["value"]
+                    total_ind = sum(d["value"] for d in ind_data)
+                    share = round((top_value / total_ind) * 100, 1) if total_ind > 0 else 0
+                else:
+                    top_name = "N/A"
+                    share = 0
         except:
             top_name = "N/A"
             share = 0
+
+        # Dynamic health
+        try:
+            dq = await data_quality(year, industry)
+            if dq and len(dq) > 0:
+                health = round(sum(d["value"] for d in dq) / len(dq), 1)
+            else:
+                health = 0
+        except:
+            health = 0
 
         return {
             "total": total,
             "top_industry": top_name,
             "industry_share": share,
-            "health": 99.8,
+            "health": health,
             "regions": 2
         }
     except: return {"total": 0, "top_industry": "N/A", "industry_share": 0, "health": 0, "regions": 0}
@@ -448,8 +505,16 @@ async def stats_summary(year: int = None, industry: str = None):
 
 @app.get("/api/stats/monthly-distribution")
 async def monthly_distribution(year: int = None, industry: str = None):
-    """Phân bố đăng ký doanh nghiệp theo tháng."""
+    """Phân bố theo tháng (Ưu tiên RPC, fallback Python)."""
     adm_supabase = get_supabase_admin()
+    try:
+        res = adm_supabase.rpc("get_monthly_distribution", {"p_year": year, "p_industry": industry}).execute()
+        if res.data:
+            month_names = ["Th1","Th2","Th3","Th4","Th5","Th6","Th7","Th8","Th9","Th10","Th11","Th12"]
+            return [{"name": month_names[int(d["month"])-1], "value": d["value"], "month": d["month"]} for d in res.data]
+    except Exception as e:
+        print(f"RPC monthly-dist failed: {e}")
+
     try:
         all_dates = []
         page = 0
@@ -482,8 +547,14 @@ async def monthly_distribution(year: int = None, industry: str = None):
 
 @app.get("/api/stats/data-quality")
 async def data_quality(year: int = None, industry: str = None):
-    """Đánh giá chất lượng dữ liệu theo từng trường (hỗ trợ filter)."""
+    """Đánh giá chất lượng dữ liệu (Ưu tiên RPC, fallback Python)."""
     adm_supabase = get_supabase_admin()
+    try:
+        res = adm_supabase.rpc("get_data_quality", {"p_year": year, "p_industry": industry}).execute()
+        if res.data: return res.data
+    except Exception as e:
+        print(f"RPC data-quality failed: {e}")
+
     try:
         total = 0
         has_phone = 0
@@ -542,3 +613,6 @@ async def debug_db():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

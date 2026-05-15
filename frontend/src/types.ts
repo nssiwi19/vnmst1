@@ -40,11 +40,11 @@ export type PipelineState = {
   verification: VerificationOutput | null;
   step:
     | "idle"
-    | "fetching"
-    | "research"
-    | "report"
-    | "verification"
-    | "done"
+    | "fetching_raw"
+    | "researching"
+    | "reporting"
+    | "verifying"
+    | "completed"
     | "error";
   error: string | null;
 };

@@ -47,9 +47,9 @@ class AgentRetryError(Exception):
 
 
 def retry_with_backoff(
-    max_retries: int = 3,
-    base_delay: float = 2.0,
-    max_delay: float = 30.0,
+    max_retries: int = 5,
+    base_delay: float = 5.0,
+    max_delay: float = 40.0,
     retryable_exceptions: tuple = (Exception,),
     logger: Optional[logging.Logger] = None,
 ) -> Callable:

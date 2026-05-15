@@ -36,8 +36,8 @@ premium_llm = LLM(
 logger = setup_agent_logger("market_research")
 
 # 2. Tools - Đổi tên thành CamelCase đơn giản để Groq dễ nhận diện
-@tool("internetSearch")
-def internetSearch(query: str) -> str:
+@tool("search_internet")
+def search_internet(query: str) -> str:
     """Tìm kiếm thông tin trên Internet bằng DuckDuckGo."""
     try:
         from duckduckgo_search import DDGS
@@ -48,19 +48,14 @@ def internetSearch(query: str) -> str:
     except Exception as e:
         return f"Lỗi tìm kiếm: {str(e)}"
 
-@tool("searchDatabase")
-def searchDatabase(query: str) -> str:
+@tool("search_database")
+def search_database(query: str) -> str:
     """Tra cứu dữ liệu doanh nghiệp trong database nội bộ bằng MST hoặc tên."""
     if not supabase: return "Lỗi kết nối Supabase."
     q = (query or "").strip()
     try:
-        # Làm sạch query: Trích xuất MST hoặc tên thực tế
+        # Làm sạch query
         q = q.replace("(", "").replace(")", "").strip()
-        if "MST:" in q:
-            # Lấy phần số sau "MST:"
-            mst_part = q.split("MST:")[1].strip().split()[0].split(",")[0]
-            q = mst_part if mst_part else q
-        
         if q.isdigit():
             res = supabase.table("company").select("*").eq("ma_so_thue", q).limit(1).execute()
         else:
@@ -78,11 +73,11 @@ def run_market_research(topic: str) -> str:
     
     researcher = Agent(
         role="Market Researcher",
-        goal="Thu thập dữ liệu thực tế về {topic} bằng cách sử dụng các công cụ được cung cấp.",
-        backstory="Bạn là chuyên gia phân tích dữ liệu tốc độ cao. Bạn LUÔN sử dụng các công cụ để lấy số liệu thực tế.",
+        goal="Thu thập dữ liệu thực tế về {topic}.",
+        backstory="Bạn là chuyên gia phân tích. Bạn CHỈ được dùng công cụ 'search_internet' và 'search_database'. KHÔNG ĐƯỢC dùng 'brave_search'.",
         verbose=True,
         llm=fast_llm,
-        tools=[internetSearch, searchDatabase],
+        tools=[search_internet, search_database],
         max_iter=3
     )
 
@@ -105,7 +100,7 @@ def run_market_research(topic: str) -> str:
     )
 
     task1 = Task(
-        description="Nghiên cứu về: {topic}. Sử dụng searchDatabase nếu là tên công ty/MST, nếu không dùng internetSearch.",
+        description="Nghiên cứu về: {topic}. Sử dụng search_database nếu là tên công ty/MST, nếu không dùng search_internet.",
         expected_output="Bản tổng hợp dữ liệu thô.",
         agent=researcher
     )

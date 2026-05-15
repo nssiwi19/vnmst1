@@ -1,0 +1,17 @@
+{
+  "name": "vnmst-root",
+  "version": "1.0.0",
+  "description": "E14CRM MCNA Multi-Agent Root Project",
+  "scripts": {
+    "commit": "cz"
+  },
+  "devDependencies": {
+    "commitizen": "^4.3.0",
+    "cz-conventional-changelog": "^3.3.0"
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  }
+}

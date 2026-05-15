@@ -2,11 +2,12 @@ import os
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
-# Tải biến môi trường từ file .env
-load_dotenv()
+# Tải biến môi trường từ file .env (tìm kiếm ở thư mục hiện tại và các thư mục cha)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 
 def get_supabase_client() -> Client:
     """

@@ -1,0 +1,22 @@
+services:
+  backend-api:
+    build:
+      context: ./backend-api
+      target: development
+    volumes:
+      - ./backend-api:/app
+      - /app/.venv
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    env_file: .env
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+    ports:
+      - "5173:5173"
+    env_file: .env

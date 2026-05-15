@@ -1,65 +1,52 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, master ]
+    branches: [main]
 
 jobs:
-  build-and-test:
+  lint-and-test-backend:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.12'
-        
-    - name: Install Backend Dependencies
-      run: |
-        cd backend-api
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        
-    - name: Set up Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: '20'
-        cache: 'npm'
-        cache-dependency-path: frontend/package-lock.json
-        
-    - name: Install Frontend Dependencies
-      run: |
-        cd frontend
-        npm ci
-        
-    - name: Build Frontend
-      run: |
-        cd frontend
-        npm run build
-      env:
-        VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-        VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        VITE_API_URL: http://localhost:8000/api
+      - uses: actions/checkout@v4
 
-  docker-build:
-    needs: build-and-test
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: Install deps
+        run: |
+          pip install ruff pytest
+          pip install -r backend-api/requirements.txt
+
+      - name: Lint (ruff)
+        run: ruff check backend-api/
+
+      - name: Test (Placeholder)
+        run: |
+          # pytest backend-api/tests/ -v
+          echo "Skipping tests for now — no tests directory yet."
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+  lint-frontend:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-      
-    - name: Build Backend Image
-      run: |
-        docker build -t vnmst-backend ./backend-api
-        
-    - name: Build Frontend Image
-      run: |
-        docker build -t vnmst-frontend ./frontend
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - run: cd frontend && npm ci
+      - run: cd frontend && npm run build
+
+  docker-verify:
+    needs: [lint-and-test-backend, lint-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Docker Build (Backend)
+        run: docker build --target production ./backend-api
+      - name: Verify Docker Build (Frontend)
+        run: docker build --target production ./frontend

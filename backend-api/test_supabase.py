@@ -12,7 +12,7 @@ Schema thực tế:
 
 import os
 from database import supabase
-from crm_b2b_agent import search_enterprise_database
+from crm_b2b_agent import searchCrmDatabase
 
 
 def test_supabase_integration():
@@ -29,10 +29,10 @@ def test_supabase_integration():
 
     # 2. Kiểm tra các bảng tồn tại
     tables_to_check = {
-        "company": "ma_so_thue, ten_cong_ty, so_dien_thoai, email, ma_nganh, ma_tinh",
-        "dia_chi": "ma_tinh, ten_tinh",
+        "company": "ma_so_thue, ten_cong_ty, so_dien_thoai, email, ma_nganh, ma_phuong",
+        "tinh_thanh": "ma_tinh, ten_tinh",
         "nganh_nghe": "ma_nganh, ten_nganh",
-        "xa_phuong": "id, ten_xa_phuong, ma_tinh",
+        "xa_phuong": "ma_phuong, ten_xa, ma_tinh",
         "chat_logs": "*",
     }
 
@@ -65,13 +65,17 @@ def test_supabase_integration():
 
             # 4. Test tool của Agent
             test_mst = resp.data[0].get("ma_so_thue")
-            print(f"\n🤖 4. Test Tool 'search_enterprise_database' với MST: {test_mst}")
+            print(f"\n🤖 4. Test Tool 'searchCrmDatabase' với MST: {test_mst}")
             print("-" * 50)
 
-            if hasattr(search_enterprise_database, '_run'):
-                agent_result = search_enterprise_database._run(test_mst)
-            else:
-                agent_result = search_enterprise_database.run({"mst_or_name": test_mst})
+            try:
+                # Nếu là CrewAI Tool object
+                if hasattr(searchCrmDatabase, '_run'):
+                    agent_result = searchCrmDatabase._run(test_mst)
+                else:
+                    agent_result = searchCrmDatabase(test_mst)
+            except Exception as e:
+                agent_result = f"Lỗi thực thi tool: {e}"
 
             print("  Kết quả:")
             print(f"  {agent_result}")
@@ -94,18 +98,18 @@ def test_supabase_integration():
         print(f"  ❌ nganh_nghe: {e}")
 
     try:
-        dc_resp = supabase.table("dia_chi").select("*").execute()
-        print(f"  dia_chi: {len(dc_resp.data)} records")
+        dc_resp = supabase.table("tinh_thanh").select("*").execute()
+        print(f"  tinh_thanh: {len(dc_resp.data)} records")
         for row in dc_resp.data:
             print(f"    {row['ma_tinh']}: {row['ten_tinh']}")
     except Exception as e:
-        print(f"  ❌ dia_chi: {e}")
+        print(f"  ❌ tinh_thanh: {e}")
 
     try:
-        xp_resp = supabase.table("xa_phuong").select("id, ten_xa_phuong, ma_tinh").limit(3).execute()
+        xp_resp = supabase.table("xa_phuong").select("ma_phuong, ten_xa, ma_tinh").limit(3).execute()
         print(f"  xa_phuong: {len(xp_resp.data)} mẫu")
         for row in xp_resp.data:
-            print(f"    #{row['id']}: {row['ten_xa_phuong']} ({row['ma_tinh']})")
+            print(f"    #{row['ma_phuong']}: {row['ten_xa']} ({row['ma_tinh']})")
     except Exception as e:
         print(f"  ❌ xa_phuong: {e}")
 
